@@ -336,7 +336,7 @@
     ]
   },
   "subscriptions": [],
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "source": {
     "repository": "https://github.com/omdsh-dev/dsh-ego-browser"
   },

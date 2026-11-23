@@ -2,6 +2,11 @@
 
 所有对用户可见的变更集中在各版本号下。格式遵循 [Keep a Changelog](https://keepachangelog.com/)，版本语义遵循 [SemVer](http://semver.org/)。
 
+## [Unreleased]
+
+### 变更
+- **项目许可证改为 GPL-3.0-only**（`LICENSE`、npm/manifest 元数据与 README）；`runtime/` 等 vendored ego-lite 组件继续保留其原始 MIT 许可，详见 `THIRD_PARTY_NOTICES.md`。
+
 ## [0.15.1] - 2026-11-21 — 安全修复：设置网关鉴权
 
 ### 修复

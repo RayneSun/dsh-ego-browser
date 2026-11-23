@@ -1,5 +1,7 @@
 # Third-Party Notices
 
+The ego-browser plugin itself is licensed under **GPL-3.0-only**; see LICENSE. The vendored components below keep their original licenses.
+
 This plugin **vendors** (embeds) the following open-source components from the
 [CitroLabs/ego-lite](https://github.com/CitroLabs/ego-lite) project (MIT License),
 including the Linux port work in [PR #234](https://github.com/citrolabs/ego-lite/pull/234)
