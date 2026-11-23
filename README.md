@@ -439,7 +439,7 @@ pnpm run build   # tsdown 三 bundle：lib/index.js + lib/client.js + bin/ego-ca
 
 ## 许可与署名
 
-插件本体 GPL-3.0-only。内置运行时嵌入 ego-lite 的 MIT 代码；可选下载的 FFmpeg 构建涉及 GPL-3.0-or-later 义务。使用或再分发前请阅读构建来源的许可证与源码获取信息，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+插件本体 GPL-3.0-only。内置 `runtime/` 为 ego-lite 的 MIT 代码。FFmpeg **不随本仓库或 npm 包分发**，仅在用户主动启用 FFmpeg 后端时由安装器下载到用户缓存；其 GPL-3.0-or-later 义务仅及于该独立下载的二进制，源码获取方式见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 供应链与权限说明
 
