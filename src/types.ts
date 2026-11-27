@@ -76,10 +76,14 @@ export interface RouteHandler {
 export interface RegisterRouteOptions {
   kind: string
   path: string
+  auth?: 'required'
   handler: (req: unknown, res: unknown) => void | Promise<void>
 }
 
 export interface WebServerLike {
+  // Capability markers for hosts that authorize registered routes before dispatch.
+  authPolicy?: unknown
+  authorize?: unknown
   get?(path: string, handler: RouteHandler): unknown
   post?(path: string, handler: RouteHandler): unknown
   route?(path: string, handler: RouteHandler): unknown

@@ -145,6 +145,7 @@ type LiveConfig = { disableFrameRelay?: boolean } & Record<string, unknown>;
 
 interface Harness {
   spawns: string[][];
+  policies: Map<string, 'required' | undefined>;
   fire: () => void;
   invoke: (path: string, req?: unknown) => Promise<ReturnType<typeof makeRes>>;
   /** The Remote control plane the host publishes (src/remote.ts). */
@@ -159,16 +160,20 @@ interface Harness {
 function mount(
   cfg: object,
   opts: {
+    routeAuth?: boolean;
     openAgentWindow?: () => Promise<unknown>;
     loginImport?: (o: unknown) => Promise<unknown>;
     getExecutorStatus?: () => Record<string, unknown>;
   } = {},
 ): Harness {
   const routes = new Map<string, RouteHandler>();
+  const policies: Harness["policies"] = new Map();
   const spawns: string[][] = [];
   const listeners = new Set<() => void>();
   const server = {
-    register(o: { path: string; handler: RouteHandler }) {
+    ...(opts.routeAuth ? { authPolicy() {}, authorize() {} } : {}),
+    register(o: { path: string; auth?: "required"; handler: RouteHandler }) {
+      policies.set(o.path, o.auth);
       routes.set(o.path, o.handler);
       return () => routes.delete(o.path);
     },
@@ -202,6 +207,7 @@ function mount(
   if (!surface) throw new Error("initCastServer did not return the Remote surface");
   return {
     spawns,
+    policies,
     surface,
     fire: () => { for (const cb of [...listeners]) cb(); },
     async invoke(path: string, req: unknown = makeReq(path)) {
@@ -272,7 +278,17 @@ describe("frame relay disabled", () => {
     expect(typeof body.toolCallCount).toBe("number");
   });
 
-  it("still enforces the trust fence (no cookie → 401, not a refusal)", async () => {
+  it("requires host authentication for every cast route and accepts an admitted Desktop request", async () => {
+    const h = mount(resolveConfig({ disableFrameRelay: true }), { routeAuth: true });
+    expect(h.policies.size).toBeGreaterThan(0);
+    expect([...new Set(h.policies.values())]).toEqual(["required"]);
+    const path = "/api/ego/spaces";
+    const res = await h.invoke(path, { ...makeReq(path), headers: { cookie: "dsh-desktop-session=fixture" } });
+    expect(res.statusCode).toBe(200);
+    expect(parseBody(res).frameRelay).toBe(false);
+  });
+
+  it("keeps the legacy trust fence (no cookie → 401, not a refusal)", async () => {
     const h = mount(resolveConfig({ disableFrameRelay: true }));
     const res = await h.invoke("/api/ego/spaces", { method: "GET", url: "/api/ego/spaces", headers: {}, async *[Symbol.asyncIterator]() {} });
     expect(res.statusCode).toBe(401);

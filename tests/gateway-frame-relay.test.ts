@@ -42,11 +42,19 @@ function makeReq(body: unknown, options: { auth?: boolean; url?: string } = {}) 
 }
 
 /** Mount the gateway over a stubbed settings service + webServer. */
-function mountGateway(initial: Record<string, unknown>) {
+function mountGateway(initial: Record<string, unknown>, routeAuth = false) {
   const cfg: Record<string, unknown> = { ...initial };
   const captured: Record<string, unknown>[] = [];
   let handler: ((req: unknown, res: unknown) => unknown) | undefined;
-  const server = { register(o: { path: string; handler: (req: unknown, res: unknown) => unknown }) { handler = o.handler; return () => {}; } };
+  let policy: "required" | undefined;
+  const server = {
+    ...(routeAuth ? { authPolicy() {}, authorize() {} } : {}),
+    register(o: { path: string; auth?: "required"; handler: (req: unknown, res: unknown) => unknown }) {
+      handler = o.handler;
+      policy = o.auth;
+      return () => {};
+    },
+  };
   const settings = {
     register() { throw new Error("unused"); },
     async update(_ns: string, patch: Record<string, unknown>) {
@@ -62,7 +70,7 @@ function mountGateway(initial: Record<string, unknown>) {
   const bridge = { source: () => cfg, onChange: () => () => {} };
   registerEgoBrowserGateway(ctx as never, bridge as never, null);
   return {
-    cfg, captured,
+    cfg, captured, policy,
     async set(patch: Record<string, unknown>, options: { auth?: boolean } = {}) {
       const res = makeRes();
       await handler!(makeReq({ patch }, options), res);
@@ -77,7 +85,13 @@ function mountGateway(initial: Record<string, unknown>) {
 }
 
 describe("ego-browser settings gateway — auth and local-only keys", () => {
-  it("rejects unauthenticated get and set requests", async () => {
+  it("requires host authentication and accepts admitted requests without a legacy cookie", async () => {
+    const g = mountGateway({}, true);
+    expect(g.policy).toBe("required");
+    expect((await g.invoke("get", {}, { auth: false })).statusCode).toBe(200);
+  });
+
+  it("rejects unauthenticated get and set requests on legacy hosts", async () => {
     const g = mountGateway({});
     const get = await g.invoke("get", {}, { auth: false });
     expect(get.statusCode).toBe(401);

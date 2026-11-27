@@ -13,6 +13,7 @@
  * "no live browser right now" instead of erroring.
  */
 import { request, type ClientRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import { registerAuthenticatedRoute } from './route-auth.ts'
 import type { EgoContext, RegisterRouteOptions, ResolvedConfig, WebServerLike } from './types.ts'
 import type { SettingsBridge } from './settings.ts'
 import type { FfmpegInstallationManager } from './ffmpeg-installation.ts'
@@ -402,36 +403,8 @@ export function initCastServer(
     return
   }
 
-  // ── trust fence for /api/ego/* ────────────────────────────────────────────
-  // Exact-path routes match BEFORE the host's `/api` prefix trust-fence route,
-  // so every handler below would otherwise answer unauthenticated requests.
-  // The host issues a `dsh-auth-<processKey>` cookie that is HttpOnly AND
-  // SameSite=Strict: a cross-site page (CSRF driver-by) never carries it, so
-  // requiring its mere presence closes the remote surface. A local process can
-  // still forge the header, but that is the same threat tier as the host's own
-  // token fence (a local process can read the process token too).
-  const isTrustedRequest = (req: IncomingMessage): boolean =>
-    /(?:^|;\s*)dsh-auth-[^=]+=/.test(String(req.headers.cookie ?? ''))
-  const guardHandler = (handler: NonNullable<RegisterRouteOptions['handler']>) =>
-    async (req: unknown, resRaw: unknown) => {
-      const res = resRaw as ServerResponse
-      if (!isTrustedRequest(req as IncomingMessage)) {
-        res.statusCode = 401
-        res.setHeader('Content-Type', 'application/json; charset=utf-8')
-        res.end('{"ok":false,"error":"unauthorized"}')
-        return
-      }
-      return handler(req, res)
-    }
-  // Scope the guard to THIS plugin's registrations only: never patch the host
-  // webServer singleton in place — other plugins' routes registered through the
-  // same service instance must keep their own (unguarded) semantics.
-  const rawRegister = rawServer.register.bind(rawServer) as (opts: RegisterRouteOptions) => () => void
-  const server = Object.assign(Object.create(Object.getPrototypeOf(rawServer)), rawServer, {
-    register: (opts: RegisterRouteOptions) => rawRegister({
-      ...opts,
-      handler: opts.handler ? guardHandler(opts.handler) : opts.handler,
-    }),
+  const register = (route: RegisterRouteOptions) => registerAuthenticatedRoute(rawServer, route, (res) => {
+    sendJson(res, 401, { ok: false, error: 'unauthorized' })
   })
 
   // ── frame-relay switch (settings: disableFrameRelay) ──────────────────────
@@ -479,7 +452,7 @@ export function initCastServer(
     }
   }
 
-  const disposeSpaces = server.register({
+  const disposeSpaces = register({
     kind: 'exact',
     path: EGO_SPACES_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
@@ -507,7 +480,7 @@ export function initCastServer(
   // GET /api/ego/stream — Server-Sent Events: real-time screencast frames and
   // the live tab/spaces list. The web shell supports exact HTTP routes and this
   // handler keeps the connection open for the worker->panel fan-out.
-  const disposeStream = server.register({
+  const disposeStream = register({
     kind: 'exact',
     path: EGO_STREAM_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
@@ -527,7 +500,7 @@ export function initCastServer(
   // POST /api/ego/input — forward a watch-panel pointer/wheel intention to the
   // real agent page. Coordinates are already in browser CSS pixels (the panel
   // maps them). The web shell passes the raw body through to the worker.
-  const disposeInput = server.register({
+  const disposeInput = register({
     kind: 'exact',
     path: EGO_INPUT_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -546,7 +519,7 @@ export function initCastServer(
   // POST /api/ego/navigate — panel refresh / manual URL. The worker performs
   // Page.reload or Page.navigate on the selected target without activating a
   // different tab.
-  const disposeNavigate = server.register({
+  const disposeNavigate = register({
     kind: 'exact',
     path: EGO_NAVIGATE_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -566,7 +539,7 @@ export function initCastServer(
   })
 
   // POST /api/ego/history — panel back/forward and the current history state.
-  const disposeHistory = server.register({
+  const disposeHistory = register({
     kind: 'exact',
     path: EGO_HISTORY_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -585,7 +558,7 @@ export function initCastServer(
   // POST /api/ego/open-window — the `+` button next to the tab strip. This is
   // a user-initiated action, so unlike model tools it may raise a real Chrome
   // window; the host builds it inside the selected task space.
-  const disposeOpenWindow = server.register({
+  const disposeOpenWindow = register({
     kind: 'exact',
     path: EGO_OPEN_WINDOW_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -603,7 +576,7 @@ export function initCastServer(
   // plugin's Typert Remote service is not dispatched. The panel still uses
   // `egoBrowser/watch` first; only a null/failed Remote result falls back here.
   // This is a lease transition, not a polling loop.
-  const disposeWatchFallback = server.register({
+  const disposeWatchFallback = register({
     kind: 'exact',
     path: EGO_WATCH_FALLBACK_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -627,7 +600,7 @@ export function initCastServer(
   // POST /api/ego/window-size — the watch panel's size-sync toggle drives the
   // REAL agent browser window. The body carries the desired PAGE viewport in
   // CSS px; the worker adds Chrome's frame and calls Browser.setWindowBounds.
-  const disposeWindowSize = server.register({
+  const disposeWindowSize = register({
     kind: 'exact',
     path: EGO_WINDOW_SIZE_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -664,7 +637,7 @@ export function initCastServer(
   })
 
   // POST /api/ego/close — close a browser tab by targetId.
-  const disposeClose = server.register({
+  const disposeClose = register({
     kind: 'exact',
     path: EGO_CLOSE_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -684,7 +657,7 @@ export function initCastServer(
   })
 
   // POST /api/ego/flush — force login cookies down to the disk profile.
-  const disposeFlush = server.register({
+  const disposeFlush = register({
     kind: 'exact',
     path: EGO_FLUSH_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
@@ -704,7 +677,7 @@ export function initCastServer(
   // profile (tabs restore); when it is already visible, --open just raises
   // the window. The actual spawn is injected by the host plugin (it owns
   // egoBin + the env resolution).
-  const disposeRaise = server.register({
+  const disposeRaise = register({
     kind: 'exact',
     path: EGO_RAISE_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
@@ -722,7 +695,7 @@ export function initCastServer(
   // login-cookie importer (issue #46). The heavy lifting (system browser
   // probe, ABE-safe CDP read, write into the agent browser) is injected by
   // the host plugin; the body mirrors ego_login_import's arguments.
-  const disposeLoginImport = server.register({
+  const disposeLoginImport = register({
     kind: 'exact',
     path: EGO_LOGIN_IMPORT_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
@@ -744,7 +717,7 @@ export function initCastServer(
     },
   })
 
-  const disposeHealth = server.register({
+  const disposeHealth = register({
     kind: 'exact',
     path: EGO_HEALTH_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
@@ -757,7 +730,7 @@ export function initCastServer(
     },
   })
 
-  const disposeVideoStatus = server.register({
+  const disposeVideoStatus = register({
     kind: 'exact', path: EGO_VIDEO_STATUS_ROUTE,
     handler: async (_req: unknown, resRaw: unknown) => {
       const res = resRaw as ServerResponse
@@ -767,7 +740,7 @@ export function initCastServer(
       return sendJson(res, 200, result || { ok: false, state: 'idle', reason: 'worker not ready' })
     },
   })
-  const disposeVideo = server.register({
+  const disposeVideo = register({
     kind: 'exact', path: EGO_VIDEO_ROUTE,
     handler: async (reqRaw: unknown, resRaw: unknown) => {
       const req = reqRaw as IncomingMessage
@@ -786,7 +759,7 @@ export function initCastServer(
   // HEALTH snapshot is not polled any more: it rides along on the Remote
   // `egoBrowser/status` snapshot (src/remote.ts).
   const disposeLoginBridge = [
-    server.register({
+    register({
       kind: 'exact', path: '/api/ego/login-extension/pair-code',
       handler: async (_req: unknown, resRaw: unknown) => {
         const res = resRaw as ServerResponse
@@ -794,7 +767,7 @@ export function initCastServer(
         catch (err) { return sendJson(res, 500, { ok: false, error: String((err as Error)?.message || err) }) }
       },
     }),
-    server.register({
+    register({
       kind: 'exact', path: '/api/ego/login-extension/import',
       handler: async (reqRaw: unknown, resRaw: unknown) => {
         const req = reqRaw as IncomingMessage
@@ -810,7 +783,7 @@ export function initCastServer(
         }
       },
     }),
-    server.register({
+    register({
       kind: 'exact', path: '/api/ego/login-extension/status',
       handler: async (reqRaw: unknown, resRaw: unknown) => {
         const req = reqRaw as IncomingMessage
